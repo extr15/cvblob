@@ -1,0 +1,173 @@
+ 
+findContours寻找到轮廓后，如何找到中心：
+可以用图像矩：
+//查找轮廓
+findContours( canny_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+
+//计算轮廓矩
+vector<Moments> mu(contours.size() );
+for( int i = 0; i < contours.size(); i++ )
+    { mu[i] = moments( contours[i], false ); }
+
+//计算轮廓的质心
+vector<Point2f> mc( contours.size() );
+for( int i = 0; i < contours.size(); i++ )
+    { mc[i] = Point2f( mu[i].m10/mu[i].m00 , mu[i].m01/mu[i].m00 ); }
+
+//画轮廓及其质心
+Mat drawing = Mat::zeros( canny_output.size(), CV_8UC3 );
+for( int i = 0; i< contours.size(); i++ )
+    {
+    Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+    drawContours( drawing, contours, i, color, 2, 8, hierarchy, 0, Point() );
+    circle( drawing, mc[i], 4, color, -1, 8, 0 );
+    }
+
+namedWindow( "Contours", CV_WINDOW_AUTOSIZE );
+imshow( "Contours", drawing );
+
+也可以求外接矩形，或者外接园
+
+minEnclosingCircle求其最小外接圆的圆心。
+float radius;
+float c[2]={0.0};
+float a[8][2];
+Point2f center;
+for(int i = 0;i < contours.size();i++){
+minEnclosingCircle(Mat(contours[i]),center,radius);//对轮廓进行多变形逼近
+circle(result,Point(center),static_cast<int>(radius),Scalar(255),2);
+
+a[i][0] = center.x;
+a[i][1] = center.y;
+}
+
+  vector<Rect> boundRect(contours.size());
+        for(size_t i = 0;i < contours.size();i++)
+        {
+                boundRect = cv::boundingRect(contours);
+                //cv::drawContours(img_dilate,contours,i,Scalar(200),1,8,vector<Vec4i>(),0,Point());
+                //cv::rectangle(img_dilate,boundRect.tl(),boundRect.br(),Scalar(255),2,8,0);
+                Point pt;
+                pt.x = (boundRect.tl().x + boundRect.br().x)/2;
+                pt.y = (boundRect.tl().y + boundRect.br().y)/2;
+
+                cv::circle(img_src,pt,3,Scalar(0,255,0),-1,8,0);
+        }
+------------ 基于distanceTransform-距离变换的手掌中心提取/*{{{*/
+      
+
+    这几天在做一个手势识别的项目，其中最的关键一步是提取手掌中心。获得手掌重心通常的做法是计算整个手部的重心，并以该重心位置近似手掌重心，这种方法只适用于没有手指伸出或只有一个手指伸出的情况，否则获得的手掌重心位置将严重偏离真实位置。
+
+    距离变换的基本含义是计算一个图像中非零像素点到最近的零像素点的距离，也就是到零像素点的最短距离。因此可以基于距离变换提取手掌重心。
+
+算法基本思想：
+
+（1）将手掌图像二值化，手掌内的区域设为白色，外部区域设为黑色。
+
+（2）将二值化后的图像经过distanceTransform变换，得到dist_image，其中每个像素点的值是该像素点到其最近的零像素点的距离。
+
+（3）找到dist_image的最大值（即圆的半径R），并记录下位置（即圆心坐标）。
+
+代码如下：
+
+ 
+
+#include "opencv2/opencv.hpp"
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <vector>
+using namespace cv;  
+using namespace std; 
+
+pair<Point,double> DetectInCircles(vector<Point> contour,Mat src)
+{
+	
+	Mat dist_image;
+	distanceTransform(src,dist_image,CV_DIST_L2,3);
+	int temp=0,R=0,cx=0,cy=0;
+	int d;
+	for (int i=0;i<src.rows;i++)
+		for (int j=0;j<src.cols;j++)
+		{
+			/* checks if the point is inside the contour. Optionally computes the signed distance from the point to the contour boundary*/
+		        d = pointPolygonTest(contour, Point2f(j, i), 0);
+			if (d>0)
+			{
+				temp=(int)dist_image.ptr<float>(i)[j];
+				if (temp>R)
+				{
+					R=temp;
+					cy=i;
+					cx=j;
+				}
+						
+			}			
+		}
+    
+    
+	return make_pair(Point(cx,cy),R);
+	   
+}
+
+int main()  
+{  
+	// Read input binary image  
+	Mat src= imread("D:\\mycode\\6.jpg",1);
+	Mat image;
+	cvtColor(src,image,CV_BGR2GRAY);
+	vector<vector<Point>> contours;  
+	
+	//findContours的输入是二值图像  
+	findContours(image,   
+		contours, // a vector of contours   
+		CV_RETR_EXTERNAL, // retrieve the external contours  
+		CV_CHAIN_APPROX_NONE); // retrieve all pixels of each contours  
+
+	// Print contours' length轮廓的个数  
+	cout << "Contours: " << contours.size() << endl;  
+	vector<vector<Point>>::const_iterator itContours= contours.begin();  
+	for ( ; itContours!=contours.end(); ++itContours) {  
+
+		cout << "Size: " << itContours->size() << endl;//每个轮廓包含的点数  
+	}  
+    //找到最大轮廓
+	int index=0,maxArea=0;	
+	for(unsigned int i=0;i<contours.size();i++)
+	{
+		int area=contourArea(contours[i]);
+		if (area>maxArea)
+		{
+			index=i;
+			maxArea=area;
+		}
+	}
+	// draw black contours on white image  
+	Mat result(image.size(),CV_8U,Scalar(0));  
+	drawContours(result,contours,      //画出轮廓  
+		-1, // draw all contours  
+		Scalar(255), // in black  
+		2); // with a thickness of 2  
+
+
+	pair<Point,double> m=DetectInCircles(contours[index],image);
+	
+	cout<<m.first.x<<" "<<m.first.y<<" "<<m.second<<endl;
+	circle(src,m.first,3,Scalar(0,0,255),2);
+	circle(src,m.first,m.second,Scalar(0,0,255),1);
+	namedWindow("result");  
+	imshow("result",src); 
+	waitKey(0);
+	
+	return 0;
+}
+
+
+dst为单通道的32-bit 浮点型矩阵，读取元素时需要用image.ptr<float>(i)[j]，用imshow显示的时候需要用normalize(dist_image, magI, 0, 1, CV_MINMAX); 将float类型的矩阵转换到可显示图像范围 (float [0, 1]).
+
+-----------
+要获得准确的手掌重心必须要将伸出的手指去除，否则手指必然会对手掌重心的计算产生影响。本文介绍一种基于距离变换的手掌重心提取算法，该算法可以避免手指的影响，精确找到手掌中心。
+
+距离变换的基本含义是计算一个图像中非零像素点到最近的零像素点的距离，也就是到零像素点的最短距离。由于伸出的手指相对于手掌来说比较细(如下图“src”窗口图像所示)，也就是说手指上的像素距离零像素距离很短，所以经过距离变换后的图像在手指部位的像素值较小(如下图“dst”窗口图像所示)，通过设定合理的阈值进行二值化，则可以得到去除手指的图像(如下图“bidist”窗口图像所示)，手掌重心即为该图像的几何中心。
+
+/*}}}*/
